@@ -10,7 +10,7 @@ from bike_scout.scraper import BlockedError
 from bike_scout.sheets import MemorySheet, column_letter, row_from_append_response
 from bike_scout.storage import Storage
 
-BASE = "https://buycycle.com/en-it/product/"
+BASE = "https://buycycle.com/it-it/product/"
 
 
 class FakeScraper:

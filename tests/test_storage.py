@@ -63,7 +63,7 @@ def test_migrates_legacy_schema(tmp_path, listing_factory):
             current_price TEXT, current_favorites INTEGER, status TEXT, sheet_row_idx INTEGER,
             title TEXT, brand TEXT, sold_date TEXT);
         CREATE TABLE price_history (id INTEGER PRIMARY KEY, listing_id INTEGER, ts TEXT, price TEXT, favorites INTEGER);
-        INSERT INTO listings (url, current_price, status) VALUES ('https://buycycle.com/en-it/product/bike-1',
+        INSERT INTO listings (url, current_price, status) VALUES ('https://buycycle.com/it-it/product/bike-1',
             '€ 1.500', 'available');
         """
     )
@@ -71,7 +71,7 @@ def test_migrates_legacy_schema(tmp_path, listing_factory):
     conn.close()
 
     with Storage(db) as storage:
-        row = storage.get_listing("https://buycycle.com/en-it/product/bike-1")
+        row = storage.get_listing("https://buycycle.com/it-it/product/bike-1")
         assert row["current_price_eur"] is None
         # first observation after migration fills the numeric column
         assert storage.record_observation(row["id"], listing_factory()) is True

@@ -9,9 +9,12 @@ listing is priced well below its market value.
 
 ## Features
 
-- **Structured scraping, not CSS selectors.** Buycycle is a Next.js app; product data travels as a React
-  Server Components payload. Bike Scout requests that payload and decodes the embedded product JSON
-  directly, which survives UI redesigns far better than HTML parsing.
+- **Structured scraping, not CSS selectors.** Buycycle is a Next.js app, and every product page inlines
+  the data it was rendered from as "flight" chunks in `<script>` tags. Bike Scout reassembles those chunks
+  and decodes the product JSON, which survives UI redesigns far better than CSS selectors.
+- **Plays by the rules.** Only pages allowed by Buycycle's `robots.txt` are fetched. The site's internal
+  RSC endpoints (`?_rsc=`) are disallowed there, so the scraper refuses to request them, and a test
+  enforces this. Requests are spaced out with random delays.
 - **Google Sheets as the dashboard.** One row per listing with an image preview, size, groupset, price,
   market price, hot-deal flag, favourites and status. Rows update in place on every run.
 - **Price history.** Each listing's price and favourites are stored in SQLite; a snapshot is written
@@ -29,7 +32,7 @@ listing is priced well below its market value.
 ```mermaid
 flowchart LR
     A[Search page] -->|product URLs| B[Scraper]
-    B -->|RSC payload → JSON| C[Listing]
+    B -->|inline Next.js data → JSON| C[Listing]
     C --> D[(SQLite history)]
     C --> E[Google Sheet]
     C -->|good deal?| F[E-mail alert]
@@ -37,7 +40,7 @@ flowchart LR
 
 | Module | Responsibility |
 |---|---|
-| [`scraper.py`](bike_scout/scraper.py) | HTTP session, search-page link extraction, RSC payload decoding, availability probes |
+| [`scraper.py`](bike_scout/scraper.py) | HTTP session, search-page link extraction, Next.js flight-data decoding, robots.txt guard, availability probes |
 | [`models.py`](bike_scout/models.py) | `Listing` dataclass and locale-aware price parsing (`€ 1.500`, `1,234.50`, `CHF 2'300`) |
 | [`storage.py`](bike_scout/storage.py) | SQLite schema with in-place migrations, snapshots, events |
 | [`sheets.py`](bike_scout/sheets.py) | Google Sheets client and an in-memory sheet with the same interface |
@@ -60,8 +63,8 @@ Then fill in:
 1. **`config/settings.json`**: your Buycycle search URL (apply filters on the site, copy the URL), the
    sheet name and alert preferences. See [`settings.example.json`](config/settings.example.json).
 2. **`.env`**:
-   - `BUYCYCLE_COOKIE`: the `Cookie` request header from your browser's DevTools while browsing
-     buycycle.com. It expires; refresh it when the tool reports `HTTP 403`.
+   - `BUYCYCLE_COOKIE` (optional): the `Cookie` request header from your browser's DevTools while
+     browsing buycycle.com, e.g. to keep your currency and locale preferences.
    - `GMAIL_APP_PASSWORD`: a Gmail [app password](https://myaccount.google.com/apppasswords) (only if alerts are enabled).
 3. **`config/credentials.json`**: a Google Cloud service-account key with the Sheets and Drive APIs
    enabled. Share your spreadsheet with the service account's e-mail address.
@@ -96,17 +99,25 @@ To run it on a schedule, add a cron entry such as `0 */3 * * * cd /path/to/bike-
 
 ```bash
 pip install -r requirements-dev.txt
-pytest          # 57 tests, no network access
+pytest          # 61 tests, no network access
 ruff check . && ruff format --check .
 ```
 
 CI runs lint and tests on Python 3.10, 3.12 and 3.13 for every push.
 
+## Current status
+
+As of November 2026 buycycle.com serves a Cloudflare bot-protection challenge (`HTTP 403`,
+`cf-mitigated: challenge`) to automated clients on its shop and product pages, with or without a session
+cookie. Bike Scout detects this, stops the run cleanly and exits with code `3`. It does not try to get
+around the protection. The parsing, storage, sheet and alert logic are covered by the offline test
+suite and fixtures.
+
 ## Disclaimer
 
 A personal, low-volume project for educational purposes. It makes a few dozen requests per run with
-delays between them. Respect Buycycle's terms of service and `robots.txt`, and don't use it to
-redistribute their data.
+delays between them, follows `robots.txt` and does not circumvent access controls. Respect Buycycle's
+terms of service and don't use it to redistribute their data.
 
 ## License
 

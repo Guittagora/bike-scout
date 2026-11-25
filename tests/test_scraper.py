@@ -6,9 +6,17 @@ import pytest
 import requests
 
 from bike_scout.models import parse_price
-from bike_scout.scraper import BlockedError, BuycycleScraper, extract_product_json, parse_product
+from bike_scout.scraper import (
+    BlockedError,
+    BuycycleScraper,
+    check_allowed,
+    embedded_payload,
+    extract_product_from_page,
+    extract_product_json,
+    parse_product,
+)
 
-URL = "https://buycycle.com/en-it/product/grizl-4242"
+URL = "https://buycycle.com/it-it/product/grizl-4242"
 
 
 class FakeSession:
@@ -68,8 +76,8 @@ def test_parse_price(raw, expected):
     assert parse_price(raw) == expected
 
 
-def test_extract_product_json_skips_nested_objects_and_string_braces(rsc_payload):
-    data = extract_product_json(rsc_payload)
+def test_extract_product_json_skips_nested_objects_and_string_braces(flight_payload):
+    data = extract_product_json(flight_payload)
     assert data is not None
     assert data["product_id"] == 4242
     assert data["meta"] == {"currency": "EUR"}  # nested object *before* the anchor is kept
@@ -80,8 +88,8 @@ def test_extract_product_json_missing_anchor():
     assert extract_product_json('{"foo": 1}') is None
 
 
-def test_parse_product_maps_all_fields(rsc_payload):
-    listing = parse_product(extract_product_json(rsc_payload), URL)
+def test_parse_product_maps_all_fields(flight_payload):
+    listing = parse_product(extract_product_json(flight_payload), URL)
     assert listing.title == "Canyon Grizl CF SL 7"
     assert listing.brand == "Canyon"
     assert listing.price == 1850.0
@@ -119,16 +127,16 @@ def test_parse_product_truncates_long_description():
 
 def test_get_listing_urls_dedupes_and_normalises():
     html = """
-      <a href="/en-it/product/bike-1">1</a>
-      <a href="/en-it/product/bike-1?ref=grid">dup</a>
-      <a href="https://buycycle.com/en-it/product/bike-2">2</a>
-      <a href="/en-it/product/bike-3?_rsc=abc">rsc</a>
-      <a href="/en-it/shop/gravel">not a product</a>
+      <a href="/it-it/product/bike-1">1</a>
+      <a href="/it-it/product/bike-1?ref=grid">dup</a>
+      <a href="https://buycycle.com/it-it/product/bike-2">2</a>
+      <a href="/it-it/product/bike-3?_rsc=abc">rsc</a>
+      <a href="/it-it/shop/gravel">not a product</a>
     """
     scraper, _ = make_scraper({"https://s": response(body=html)})
     assert scraper.get_listing_urls("https://s") == [
-        "https://buycycle.com/en-it/product/bike-1",
-        "https://buycycle.com/en-it/product/bike-2",
+        "https://buycycle.com/it-it/product/bike-1",
+        "https://buycycle.com/it-it/product/bike-2",
     ]
 
 
@@ -144,17 +152,39 @@ def test_get_listing_urls_raises_on_http_error():
         scraper.get_listing_urls("https://s")
 
 
-def test_fetch_listing_uses_rsc_url(rsc_payload):
-    rsc = "https://buycycle.com/en-it/product/grizl-4242?_rsc=xyz"
-    scraper, session = make_scraper(
-        {
-            ("GET", URL): response(body='<script>"/en-it/product/grizl-4242?_rsc=xyz"</script>'),
-            ("GET", rsc): response(body=rsc_payload),
-        }
-    )
+def test_fetch_listing_reads_the_product_page_only(product_page):
+    scraper, session = make_scraper({URL: response(body=product_page)})
     listing = scraper.fetch_listing(URL)
-    assert listing is not None and listing.url == URL
-    assert session.calls[-1][2]["headers"]["RSC"] == "1"
+    assert listing is not None and listing.title == "Canyon Grizl CF SL 7"
+    assert [(method, url) for method, url, _ in session.calls] == [("GET", URL)]
+    assert "RSC" not in session.calls[0][2].get("headers", {})
+
+
+def test_extract_product_from_page_reassembles_flight_chunks(product_page):
+    assert "__next_f" not in embedded_payload(product_page)
+    assert extract_product_from_page(product_page)["product_id"] == 4242
+
+
+def test_extract_product_from_page_falls_back_to_inline_json():
+    page = '<script id="__NEXT_DATA__">{"props":{"product":{"product_id":7,"name":"Tarmac"}}}</script>'
+    assert extract_product_from_page(page) == {"product_id": 7, "name": "Tarmac"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://buycycle.com/it-it/product/bike?_rsc=abc",
+        "https://buycycle.com/it-it/shop/gravel?page=2&rsc=1",
+    ],
+)
+def test_robots_disallowed_urls_are_never_fetched(url):
+    scraper, session = make_scraper({})
+    with pytest.raises(ValueError, match="robots.txt"):
+        scraper.fetch_listing(url)
+    with pytest.raises(ValueError, match="robots.txt"):
+        scraper.get_listing_urls(url)
+    assert session.calls == []
+    check_allowed("https://buycycle.com/it-it/product/bike")  # allowed: no exception
 
 
 def test_fetch_listing_returns_none_without_product_data():
@@ -168,7 +198,7 @@ def test_fetch_listing_returns_none_without_product_data():
         (response(200), True),
         (response(404), False),
         (response(410), False),
-        (response(200, url="https://buycycle.com/en-it/shop/gravel"), False),  # redirected away
+        (response(200, url="https://buycycle.com/it-it/shop/gravel"), False),  # redirected away
         (response(429), None),
         (response(503), None),
         (requests.ConnectionError("boom"), None),  # network errors are *not* "sold"
@@ -187,5 +217,5 @@ def test_check_available_falls_back_to_get_on_405():
 
 def test_forbidden_is_reported_as_blocked():
     scraper, _ = make_scraper({"https://s": response(status=403)})
-    with pytest.raises(BlockedError, match="cookie"):
+    with pytest.raises(BlockedError, match="bot protection"):
         scraper.get_listing_urls("https://s")

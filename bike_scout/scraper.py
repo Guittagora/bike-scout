@@ -1,9 +1,13 @@
 """HTTP scraping and parsing of Buycycle listings.
 
-Buycycle is a Next.js app: product pages ship their data as a React Server
-Components (RSC) payload. Rather than parsing rendered HTML, the scraper
-requests that payload (``RSC: 1`` header) and decodes the embedded product
-JSON object directly, which is far more stable than CSS selectors.
+Buycycle is a Next.js app: every product page inlines the data it was rendered
+from as "flight" chunks (``self.__next_f.push([1, "..."])`` script tags).
+Instead of parsing the rendered markup with CSS selectors, the scraper
+reassembles those chunks from the ordinary product page and decodes the
+embedded product JSON, which is far more stable than selectors.
+
+Only pages that buycycle.com/robots.txt allows are fetched: the separate RSC
+endpoints (``?_rsc=``) are disallowed there, so the scraper never requests them.
 """
 
 from __future__ import annotations
@@ -37,7 +41,9 @@ DEFAULT_HEADERS = {
 }
 DESCRIPTION_MAX_CHARS = 250
 SOLD_STATUSES = {"sold", "venduta", "reserved_sold"}
-_RSC_URL_RE = re.compile(r'"(/[^"]*?_rsc=[^"]+)"')
+_NEXT_F_RE = re.compile(r'self\.__next_f\.push\(\[\s*1\s*,\s*("(?:[^"\\]|\\.)*")\s*\]\)', re.S)
+# Paths disallowed by https://buycycle.com/robots.txt that this tool could otherwise touch.
+_DISALLOWED_MARKERS = ("_rsc", "?rsc=", "&rsc=")
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
@@ -54,12 +60,36 @@ def _is_challenge(text: str) -> bool:
 def _ensure_ok(response: requests.Response) -> None:
     """Raise BlockedError for anti-bot refusals, HTTPError for other failures."""
     if response.status_code == 403:
-        raise BlockedError(f"HTTP 403 for {response.url} - the session cookie is probably expired")
+        raise BlockedError(f"HTTP 403 for {response.url}: blocked by the site's bot protection (Cloudflare)")
     response.raise_for_status()
 
 
+def check_allowed(url: str) -> None:
+    """Refuse URLs that buycycle.com/robots.txt disallows."""
+    if any(marker in url for marker in _DISALLOWED_MARKERS):
+        raise ValueError(f"Refusing to fetch {url}: disallowed by buycycle.com/robots.txt")
+
+
+def embedded_payload(page_html: str) -> str:
+    """Reassemble the Next.js flight data that a page inlines in its <script> tags."""
+    chunks = []
+    for match in _NEXT_F_RE.finditer(page_html):
+        try:
+            chunks.append(json.loads(match.group(1)))
+        except json.JSONDecodeError:
+            continue
+    return "".join(chunks)
+
+
+def extract_product_from_page(page_html: str) -> dict[str, Any] | None:
+    """Find the product JSON in a product page (flight chunks first, then raw inline JSON)."""
+    payload = embedded_payload(page_html)
+    data = extract_product_json(payload) if payload else None
+    return data if data is not None else extract_product_json(page_html)
+
+
 def extract_product_json(payload: str, anchor: str = '"product_id":') -> dict[str, Any] | None:
-    """Return the JSON object that contains ``anchor`` inside an RSC payload.
+    """Return the JSON object that contains ``anchor`` inside a text payload.
 
     Walks backwards from the anchor trying each ``{`` as a candidate start and
     lets :class:`json.JSONDecoder` do the decoding, so braces inside strings
@@ -176,12 +206,13 @@ class BuycycleScraper:
     # -- search -----------------------------------------------------------
     def get_listing_urls(self, search_url: str) -> list[str]:
         """Return the product URLs linked from a search/catalogue page."""
+        check_allowed(search_url)
         log.info("Scanning search page %s", search_url)
         response = self.session.get(search_url, timeout=self.timeout)
         _ensure_ok(response)
         text = response.content.decode("utf-8", errors="ignore")
         if _is_challenge(text):
-            raise BlockedError("Search page returned a Cloudflare challenge; refresh the cookie")
+            raise BlockedError("Search page returned a Cloudflare bot-protection challenge")
 
         soup = BeautifulSoup(text, "html.parser")
         urls: list[str] = []
@@ -205,6 +236,7 @@ class BuycycleScraper:
         (network error, rate-limit, challenge...). Callers must not treat
         ``None`` as "sold".
         """
+        check_allowed(url)
         try:
             response = self.session.head(url, timeout=self.timeout, allow_redirects=True)
             if response.status_code == 405:
@@ -221,28 +253,21 @@ class BuycycleScraper:
         return "/product/" in final_path
 
     # -- detail ------------------------------------------------------------
-    def find_rsc_url(self, url: str) -> str:
-        """Find the RSC hydration URL referenced by a product page (fallback: the page itself)."""
-        response = self.session.get(url, timeout=self.timeout)
-        _ensure_ok(response)
-        match = _RSC_URL_RE.search(response.content.decode("utf-8", errors="ignore"))
-        return urljoin(BASE_URL, match.group(1)) if match else url
-
     def fetch_listing(self, url: str) -> Listing | None:
-        """Download and parse one listing. Returns ``None`` if no product data was found.
+        """Download a product page and parse it. Returns ``None`` if no product data was found.
 
         Raises :class:`BlockedError` on anti-bot challenges and
         :class:`requests.RequestException` on HTTP/network errors.
         """
-        rsc_url = self.find_rsc_url(url)
+        check_allowed(url)
         self._sleep(random.uniform(*self.jitter))
-        response = self.session.get(rsc_url, headers={"RSC": "1", "Accept": "*/*"}, timeout=self.timeout)
+        response = self.session.get(url, timeout=self.timeout)
         _ensure_ok(response)
-        payload = response.content.decode("utf-8", errors="ignore")
-        if _is_challenge(payload):
-            raise BlockedError("Product page returned a Cloudflare challenge; refresh the cookie")
-        data = extract_product_json(payload)
+        page = response.content.decode("utf-8", errors="ignore")
+        if _is_challenge(page):
+            raise BlockedError("Product page returned a Cloudflare bot-protection challenge")
+        data = extract_product_from_page(page)
         if data is None:
-            log.warning("No product JSON found in %s", rsc_url)
+            log.warning("No product data found in %s", url)
             return None
         return parse_product(data, url)
