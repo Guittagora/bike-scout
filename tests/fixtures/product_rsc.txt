@@ -1,0 +1,4 @@
+0:["$","html",null,{"lang":"en"}]
+1:{"layout":{"theme":"dark","menu":{"items":[1,2]}},"seo":"Buy {used} bikes"}
+2:{"queries":[{"state":{"data":{"meta":{"currency":"EUR"},"product_id":4242,"brand_name":"Canyon","name":"Grizl CF SL 7","price":1850,"price_formatted":"€ 1.850","status":"active","country":"DE","favorites_count":17,"published_at":"2026-10-03T09:12:00Z","attributes":[{"key":"frame_size_string","value":"M"},{"key":"component_name","value":"Shimano GRX 820"}],"information":{"data":{"description":{"translated_value":"<p>Great bike &amp; well kept.</p>\n<p>Curly {braces} inside text}</p>"}}},"images":[{"url_350":"https://img.example.com/4242_350.jpg","url":"https://img.example.com/4242.jpg"}],"additional_data":{"common_price":2600,"hot_deal":true}}}}]}
+3:["$","footer",null,{}]

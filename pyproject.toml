@@ -1,0 +1,39 @@
+[project]
+name = "bike-scout"
+version = "1.0.0"
+description = "Monitor Buycycle listings, track price history and get e-mail alerts for good deals."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "gspread>=6.0",
+    "google-auth>=2.20",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+bike-scout = "bike_scout.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["bike_scout"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["src", "main.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["SIM103", "SIM108"]

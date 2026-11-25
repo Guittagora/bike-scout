@@ -1,0 +1,22 @@
+{
+  "search_url": "https://buycycle.com/en-it/shop/main-types/bikes/types/gravel/sort-by/new/high-demand/1",
+  "sheet_name": "Bike Scout",
+  "credentials_path": "config/credentials.json",
+  "cookie": "",
+  "max_listings": 20,
+  "delay_seconds": 2.5,
+  "db_path": "data/history.db",
+  "check_existing_first": true,
+  "check_method": "head",
+  "email": {
+    "enabled": false,
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "sender": "you@gmail.com",
+    "app_password": "",
+    "recipient": "you@gmail.com",
+    "only_hot_deals": false,
+    "only_good_deals": true,
+    "good_deal_ratio": 0.8
+  }
+}
