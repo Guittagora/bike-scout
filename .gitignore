@@ -22,10 +22,6 @@ config/*
 # Local data (scraped history)
 data/
 
-# Legacy code kept locally only
-src/
-main.py
-
 # IDE / OS
 .vscode/
 .idea/
